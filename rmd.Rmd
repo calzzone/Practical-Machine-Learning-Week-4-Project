@@ -17,7 +17,7 @@ The test dataset contains 20 test cases of unknown class. The traing dataset con
 
 ```{r}
 library(tidyverse)
-library(magrittr)
+# library(magrittr) # %<>% operator
 library(caret)
 
 setwd("~/Documents/Coursera/pract_machi_learn/")
