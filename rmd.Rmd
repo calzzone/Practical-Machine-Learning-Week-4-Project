@@ -1,0 +1,102 @@
+---
+title: "Fitbit Data Analysis"
+author: "Alex Istrate"
+subtitle: 'Practical Machine Learning: Week 4 Project'
+output:
+  html_document:
+    df_print: paged
+---
+
+This is the week 4 project of the Practical Machine Learning MOOC on Coursera. It is about predicting the type of weight-lifting exercise (coded by variable `classs`, with values "A" to "E"). A training dataset (with column `classe`) and a test dataset (without it) were provided as csv files.
+
+More information on the weight-lifting experiment is available online at http:/groupware.les.inf.puc-rio.br/har#weight_lifting_exercises .
+
+Both files required basic cleaning. I removed from the training dataset the coulumns not available in the test dataset (missing, with no values or with no variability).
+
+The test dataset contains 20 test cases of unknown class. The traing dataset contains almost 20 000 data-points in 58 variables. I will further partition it in a training dataset and a validation set against which I will develop a ML model.
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(caret)
+
+setwd("~/Documents/Coursera/pract_machi_learn/")
+# download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "training.csv")
+# download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "test.csv")
+
+test <- read.csv("test.csv", na.strings=c("NA","#DIV/0!", "")) %>%
+  select_if(function(x) !(all(is.na(x)) | all(x==""))) %>% # remove empty colums
+  select(-c("new_window", "problem_id", "X")) %>% # no variation in new_window, X1 = problem_id = row number
+  mutate_if(is.character, as.factor) %>%
+  na.omit()
+
+training <- read.csv("training.csv", na.strings=c("NA","#DIV/0!", "")) %>% 
+  # don't train on columns that cannot be tested. there is a variable named classe, which is related to the assignemment but not testable.
+  select(c(colnames(test), "classe")) %>% 
+  mutate_if(is.character, as.factor) %>%
+  na.omit()
+
+# classe <- training$classe
+# training %<>% select(-c("classe"))
+
+# summary(training$classe)
+# summary(training)
+# summary(test)
+
+```
+
+# Training a model
+
+The default model for the `caret` package is *Random Forest* with 500 trees. I also added an instruction to also perform a 10-folds cross-validation. 
+
+The main disadvantage is that it is slow. I chose to make the training data small (10% of the original trainig data, about 2000 samples) in stead of a more traditional split such as 75%. I used the rest of the original training data for validation. My experiments showed that even smaller training partitions may work well enough on the validation dataset (such as 1% to 5%, which I used while developping this document).
+
+
+```{r, cache=T}
+set.seed(1)
+part = caret::createDataPartition(training$`classe`, p = 0.1)[[1]] # about 2000 samples. my laptop takes too long to train on more and I don't want to wait. 
+train_1 = training[ part,] 
+valid_1 = training[-part,]
+
+set.seed(1)
+model_1 <- caret::train(`classe` ~ ., data=train_1,
+                       method="rf",
+                       trControl=caret::trainControl(method = "CV", 10)) # cross-validation, 10-fold)
+
+# Summary of the model
+model_1
+```
+
+## Confusion matrix and accuracy statistics
+
+This model reached an accuracy very close to 100% compared to the validation data, which suggest that it is likely to perform adequately on the test data.
+
+```{r, fig.cap="Confusion matrix"}
+predicted <- predict(model_1, valid_1)
+cm <- caret::confusionMatrix(valid_1$classe, predicted)
+cm
+
+data.frame(cm$table) %>% 
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq)) %>%
+  ggplot(aes(x = Reference, y = Prediction, fill = prop)) +
+  geom_tile(color="white", size=0.5) +
+  geom_text(aes(label = scales::percent(prop, 0.1))) +
+  scale_fill_viridis_c("", direction = -1, labels=scales::percent_format(), limits=c(0, 1), breaks=seq(0, 1, 0.25))
+
+# acc <- caret::postResample(predicted,valid_1$`classe`)
+# acc
+```
+
+# Final prediction
+
+Here is a dataframe with the predicted class for each test-case as well as estimated probabilities of each class.
+
+```{r}
+final_prediction <- predict(model_1, test, type="prob")
+final_prediction %>% bind_cols(`class` = apply(final_prediction, 1, which.max)) %>%
+  mutate(`class`=factor(`class`, levels = 1:5, labels=LETTERS[1:5])) %>%
+  mutate(`N` = 1:20)
+```
+
+.
